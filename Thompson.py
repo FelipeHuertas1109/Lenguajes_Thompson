@@ -298,6 +298,23 @@ def alias_dfa(dfa: DFA) -> Tuple[Dict[FrozenSet[int], str], Dict[str, FrozenSet[
     rev: Dict[str, FrozenSet[int]] = {v: k for k, v in aliases.items()}
     return aliases, rev
 
+def get_dfa_alphabet(dfa: DFA) -> Set[str]:
+    """Obtiene el alfabeto del DFA (símbolos usados en las transiciones)."""
+    alphabet: Set[str] = set()
+    for transitions in dfa.trans.values():
+        alphabet.update(transitions.keys())
+    return alphabet
+
+def get_dfa_states(dfa: DFA) -> Set[FrozenSet[int]]:
+    """Obtiene todos los estados del DFA."""
+    states = set(dfa.trans.keys())
+    states.add(dfa.start)
+    states.update(dfa.accepts)
+    # También incluir estados destino que puedan no estar como origen
+    for transitions in dfa.trans.values():
+        states.update(transitions.values())
+    return states
+
 def print_dfa_aliased(dfa: DFA) -> None:
     aliases, _ = alias_dfa(dfa)
     start = aliases[dfa.start]
@@ -305,6 +322,33 @@ def print_dfa_aliased(dfa: DFA) -> None:
     print(f"Inicio AFD: {start}")
     print("Aceptación AFD:", ", ".join(accepts) if accepts else "(ninguno)")
     print("Transiciones AFD:")
+    for src in sorted(dfa.trans.keys(), key=lambda x: sorted(x)):
+        for sym, dst in sorted(dfa.trans[src].items(), key=lambda x: x[0]):
+            print(f"  {aliases[src]} --{sym}--> {aliases[dst]}")
+
+def print_dfa_complete(dfa: DFA) -> None:
+    """Imprime información completa del DFA: alfabeto, estados, aceptación y transiciones."""
+    aliases, _ = alias_dfa(dfa)
+    
+    # Alfabeto
+    alphabet = sorted(get_dfa_alphabet(dfa))
+    print("Alfabeto:", ", ".join(alphabet) if alphabet else "(ninguno)")
+    
+    # Estados
+    all_states = get_dfa_states(dfa)
+    state_names = sorted([aliases[s] for s in all_states])
+    print("Estados:", ", ".join(state_names))
+    
+    # Estado inicial
+    start = aliases[dfa.start]
+    print("Estado inicial:", start)
+    
+    # Estados de aceptación
+    accepts = [aliases[s] for s in sorted(dfa.accepts, key=lambda x: sorted(x))]
+    print("Estados de aceptación:", ", ".join(accepts) if accepts else "(ninguno)")
+    
+    # Transiciones
+    print("Transiciones:")
     for src in sorted(dfa.trans.keys(), key=lambda x: sorted(x)):
         for sym, dst in sorted(dfa.trans[src].items(), key=lambda x: x[0]):
             print(f"  {aliases[src]} --{sym}--> {aliases[dst]}")
@@ -434,8 +478,8 @@ if __name__ == "__main__":
     nfa = regex_to_nfa(regex)
     dfa = nfa_to_dfa(nfa)
 
-    # 3) Mostrar SOLO AFD (con alias) y graficar sin bloquear
-    print_dfa_aliased(dfa)
+    # 3) Mostrar información completa del AFD y graficar sin bloquear
+    print_dfa_complete(dfa)
     fig = None
     try:
         fig = draw_dfa_networkx(dfa)  # no bloquea
