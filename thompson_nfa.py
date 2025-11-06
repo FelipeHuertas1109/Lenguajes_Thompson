@@ -9,6 +9,8 @@
 from dataclasses import dataclass, field
 from typing import Dict, Set, List, FrozenSet, Tuple
 import sys
+import csv
+from pathlib import Path
 
 EPSILON = "ε"
 
@@ -353,6 +355,76 @@ def print_dfa_complete(dfa: DFA) -> None:
         for sym, dst in sorted(dfa.trans[src].items(), key=lambda x: x[0]):
             print(f"  {aliases[src]} --{sym}--> {aliases[dst]}")
 
+# ------------------------------ Helpers CSV ------------------------------
+
+def dfa_to_csv_fields(dfa: DFA) -> Tuple[str, str, str]:
+    """
+    Devuelve (alfabeto, estados, transiciones) en formato texto.
+    - alfabeto: símbolos separados por espacio.
+    - estados: lista de alias S0,S1,... separados por espacio.
+    - transiciones: 'Sx --a--> Sy' separados por ' | '.
+    """
+    aliases, _ = alias_dfa(dfa)
+    alphabet = sorted(get_dfa_alphabet(dfa))
+    all_states = sorted([aliases[s] for s in get_dfa_states(dfa)])
+    trans_lines = []
+    for src in sorted(dfa.trans.keys(), key=lambda x: sorted(x)):
+        for sym, dst in sorted(dfa.trans[src].items(), key=lambda x: x[0]):
+            trans_lines.append(f"{aliases[src]} --{sym}--> {aliases[dst]}")
+    return (" ".join(alphabet),
+            " ".join(all_states),
+            " | ".join(trans_lines))
+
+def dfa_accepting_aliases(dfa: DFA) -> str:
+    aliases, _ = alias_dfa(dfa)
+    accepts = [aliases[s] for s in sorted(dfa.accepts, key=lambda x: sorted(x))]
+    return " ".join(accepts) if accepts else ""
+
+# ------------------------------ Batch: .txt -> .csv ------------------------------
+
+def process_regex_file_to_csv(input_path: str, output_csv: str) -> None:
+    """
+    Lee regex (una por línea) desde input_path y escribe output_csv con columnas:
+    Regex, Alfabeto, Estados de aceptación, Estados, Transiciones, Error
+    """
+    in_path = Path(input_path)
+    if not in_path.exists():
+        raise FileNotFoundError(f"No existe el archivo: {input_path}")
+
+    with in_path.open("r", encoding="utf-8") as f_in, \
+         open(output_csv, "w", newline="", encoding="utf-8") as f_out:
+
+        writer = csv.DictWriter(
+            f_out,
+            fieldnames=["Regex", "Alfabeto", "Estados de aceptación", "Estados", "Transiciones", "Error"]
+        )
+        writer.writeheader()
+
+        for lineno, raw in enumerate(f_in, start=1):
+            rx = raw.strip()
+            if not rx or rx.startswith("#"):
+                continue  # saltar vacías o comentarios
+            row = {
+                "Regex": rx,
+                "Alfabeto": "",
+                "Estados de aceptación": "",
+                "Estados": "",
+                "Transiciones": "",
+                "Error": ""
+            }
+            try:
+                nfa = regex_to_nfa(rx)
+                dfa = nfa_to_dfa(nfa)
+                alfabeto, estados, trans = dfa_to_csv_fields(dfa)
+                row["Alfabeto"] = alfabeto
+                row["Estados de aceptación"] = dfa_accepting_aliases(dfa)
+                row["Estados"] = estados
+                row["Transiciones"] = trans
+            except Exception as e:
+                # Registrar error pero continuar con las demás líneas
+                row["Error"] = f"Línea {lineno}: {type(e).__name__}: {e}"
+            writer.writerow(row)
+
 # ------------------------------ Reconocimiento con AFD ------------------------------
 
 def dfa_accepts(dfa: DFA, cadena: str) -> bool:
@@ -468,10 +540,29 @@ def export_dfa_jff(dfa: DFA, path: str):
 # ------------------------------ CLI ------------------------------
 
 if __name__ == "__main__":
+    # Uso:
+    #   python thompson_nfa.py "<regex>"
+    #   python thompson_nfa.py --batch=entrada.txt --csv=salida.csv
     if len(sys.argv) < 2:
-        print("Uso: python thompson_nfa.py '<regex>'")
+        print("Uso:")
+        print("  python thompson_nfa.py '<regex>'")
+        print("  python thompson_nfa.py --batch=entrada.txt --csv=salida.csv")
         sys.exit(0)
 
+    # Modo batch (archivo -> csv)
+    batch_arg = next((a for a in sys.argv[1:] if a.startswith("--batch=")), None)
+    csv_arg   = next((a for a in sys.argv[1:] if a.startswith("--csv=")), None)
+    if batch_arg:
+        input_path = batch_arg.split("=", 1)[1]
+        output_csv = (csv_arg.split("=", 1)[1] if csv_arg else "resultado.csv")
+        try:
+            process_regex_file_to_csv(input_path, output_csv)
+            print(f"[OK] CSV generado: {output_csv}")
+        except Exception as e:
+            print(f"[!] Error en modo batch: {e}")
+        sys.exit(0)
+
+    # --- Modo interactivo de siempre (una regex) ---
     regex = sys.argv[1]
 
     # 1) Regex -> NFA ; 2) NFA -> DFA
@@ -479,6 +570,7 @@ if __name__ == "__main__":
     dfa = nfa_to_dfa(nfa)
 
     # 3) Mostrar información completa del AFD y graficar sin bloquear
+    print(f"Regex: {regex}")
     print_dfa_complete(dfa)
     fig = None
     try:
@@ -486,6 +578,15 @@ if __name__ == "__main__":
     except ImportError:
         print("\n[!] Para ver el gráfico instala:")
         print("    pip install networkx matplotlib")
+
+    # 3.5) Exportar a JFLAP si se pasó --jff=archivo.jff (opcional)
+    try:
+        jff_arg = next((a for a in sys.argv[2:] if a.startswith("--jff=")), None)
+        if jff_arg:
+            export_dfa_jff(dfa, jff_arg.split("=",1)[1])
+            print("[OK] Exportado JFLAP:", jff_arg.split("=",1)[1])
+    except Exception as e:
+        print("[!] Error exportando JFLAP:", e)
 
     # 4) Loop de prueba de cadenas
     print("\nIngresa cadenas para probar contra el AFD (Enter vacío para salir):")
